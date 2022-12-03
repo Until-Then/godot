@@ -24,11 +24,6 @@ jobs:
             target: release_debug
             tools: true
 
-          - name: Linux Server w/ Mono (target=release, tools=no)
-            cache-name: server-template-mono
-            target: release
-            tools: false
-
     steps:
       - uses: actions/checkout@v3
 
@@ -60,3 +55,13 @@ jobs:
           platform: server
           target: ${{ matrix.target }}
           tools: ${{ matrix.tools }}
+
+      - name: Prepare artifact
+        run: |
+          strip bin/godot_server.*
+          chmod +x bin/godot_server.*
+
+      - name: Upload artifact
+        uses: ./.github/actions/upload-artifact
+        with:
+          name: ${{ matrix.cache-name }}

@@ -6,7 +6,8 @@ on: [push, pull_request]
 env:
   # Only used for the cache key. Increment version to force clean build.
   GODOT_BASE_BRANCH: 3.5
-  SCONSFLAGS: verbose=yes warnings=all werror=yes debug_symbols=no
+  GODOT_BIN: "./bin/godot.windows.opt.tools.64.exe"
+  SCONSFLAGS: verbose=yes warnings=all werror=yes debug_symbols=no mono_prefix=mono6
   SCONS_CACHE_MSVC_CONFIG: true
 
 concurrency:
@@ -22,16 +23,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Editor (target=release_debug, tools=yes)
-            cache-name: windows-editor
+          - name: Editor w/ Mono (target=release_debug, tools=yes)
+            cache-name: windows-editor-mono
             target: release_debug
             tools: true
-            bin: "./bin/godot.windows.opt.tools.64.exe"
+            sconsflags: module_mono_enabled=yes mono_static=yes mono_glue=no
 
-          - name: Template (target=release, tools=no)
-            cache-name: windows-template
+          - name: Template w/ Mono (target=release, tools=no)
+            cache-name: windows-template-mono
             target: release
             tools: false
+            sconsflags: module_mono_enabled=yes mono_static=yes mono_glue=no
+
+          - name: Template w/ Mono (target=release_debug, tools=no)
+            cache-name: windows-template-debug-mono
+            target: release_debug
+            tools: false
+            sconsflags: module_mono_enabled=yes mono_static=yes mono_glue=no
 
     steps:
       - uses: actions/checkout@v3
@@ -45,10 +53,44 @@ jobs:
       - name: Setup python and scons
         uses: ./.github/actions/godot-deps
 
+      - name: Setup mesa-dist-win
+        uses: ssciwr/setup-mesa-dist-win@v1
+      
+      - name: Download Mono
+        run: |
+          Invoke-WebRequest -Uri https://github.com/godotengine/godot-mono-builds/releases/download/release-5299efd/windows-x86_64.zip -OutFile .\mono.zip
+      
+      - name: Setup Mono
+        shell: bash
+        run: |
+          7z.exe x mono.zip -omono6  
+          rm mono.zip
+          pushd mono6
+          mv desktop-windows-x86_64-release/* .
+          rm -rf desktop-windows-x86_64-release
+          popd
+
+      - name: Import certificates
+        run: |
+          curl.exe -LO https://curl.haxx.se/ca/cacert.pem
+          certutil.exe -addstore -f "Root" cacert.pem
+
       - name: Compilation
         uses: ./.github/actions/godot-build
         with:
           sconsflags: ${{ env.SCONSFLAGS }}
+          platform: windows
+          target: release_debug
+          tools: true
+
+      - name: Generate Mono glue code
+        run: |
+          ${{ env.GODOT_BIN }} --no-window --generate-mono-glue modules/mono/glue || true
+
+      - name: Compilation (mono_glue=yes)
+        uses: ./.github/actions/godot-build
+        with:
+          sconsflags: ${{ env.SCONSFLAGS }} ${{ matrix.sconsflags }} mono_glue=yes
           platform: windows
           target: ${{ matrix.target }}
           tools: ${{ matrix.tools }}

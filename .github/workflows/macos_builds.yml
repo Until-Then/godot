@@ -5,6 +5,7 @@ on: [push, pull_request]
 env:
   # Only used for the cache key. Increment version to force clean build.
   GODOT_BASE_BRANCH: 3.5
+  GODOT_BIN: "./bin/godot.osx.opt.tools.64"
   SCONSFLAGS: verbose=yes warnings=all werror=yes debug_symbols=no
 
 concurrency:
@@ -19,16 +20,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Editor (target=release_debug, tools=yes)
-            cache-name: macos-editor
+          - name: Editor w/ Mono (target=release_debug, tools=yes)
+            cache-name: macos-editor-mono
             target: release_debug
             tools: true
-            bin: "./bin/godot.osx.opt.tools.64"
+            sconsflags: module_mono_enabled=yes mono_static=yes mono_glue=no
 
-          - name: Template (target=release, tools=no)
-            cache-name: macos-template
+          - name: Template w/ Mono (target=release, tools=no)
+            cache-name: macos-template-mono
             target: release
             tools: false
+            sconsflags: module_mono_enabled=yes mono_static=yes mono_glue=no
+
+          - name: Template w/ Mono (target=release_debug, tools=no)
+            cache-name: macos-template-debug-mono
+            target: release_debug
+            tools: false
+            sconsflags: module_mono_enabled=yes mono_static=yes mono_glue=no
 
     steps:
       - uses: actions/checkout@v3
@@ -42,10 +50,32 @@ jobs:
       - name: Setup python and scons
         uses: ./.github/actions/godot-deps
 
+      - name: Setup Mono
+        uses: maxim-lobanov/setup-xamarin@v1
+        with:
+          mono-version: '6.12'
+
+      - name: Import certificates
+        run: |
+          curl -LO https://curl.haxx.se/ca/cacert.pem
+          cert-sync --user cacert.pem
+
       - name: Compilation
         uses: ./.github/actions/godot-build
         with:
           sconsflags: ${{ env.SCONSFLAGS }}
+          platform: osx
+          target: release_debug
+          tools: true
+
+      - name: Generate Mono glue code
+        run: |
+          ${{ env.GODOT_BIN }} --generate-mono-glue modules/mono/glue || true
+
+      - name: Compilation (mono_glue=yes)
+        uses: ./.github/actions/godot-build
+        with:
+          sconsflags: ${{ env.SCONSFLAGS }} ${{ matrix.sconsflags }} mono_glue=yes
           platform: osx
           target: ${{ matrix.target }}
           tools: ${{ matrix.tools }}
