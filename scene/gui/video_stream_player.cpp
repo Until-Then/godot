@@ -159,6 +159,7 @@ void VideoStreamPlayer::_notification(int p_notification) {
 			playback->update(delta); // playback->is_playing() returns false in the last video frame
 
 			if (!playback->is_playing()) {
+				resampler.flush();
 				emit_signal(SceneStringNames::get_singleton()->finished);
 			}
 		} break;
