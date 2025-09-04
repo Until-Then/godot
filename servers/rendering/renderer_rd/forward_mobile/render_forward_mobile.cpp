@@ -1932,6 +1932,10 @@ void RenderForwardMobile::_fill_render_list(RenderListType p_render_list, const 
 
 			surf = surf->next;
 		}
+		
+		if (p_render_list == RENDER_LIST_OPAQUE && lightmap_captures_used) {
+			RD::get_singleton()->buffer_update(scene_state.lightmap_capture_buffer, 0, sizeof(LightmapCaptureData) * lightmap_captures_used, scene_state.lightmap_captures);
+		}
 	}
 }
 
