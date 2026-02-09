@@ -211,7 +211,7 @@ void WorkerThreadPool::_post_task(Task *p_task, bool p_high_priority, bool p_enq
 
 	task_mutex.lock();
 	p_task->low_priority = p_enqueue_as_low_priority || !p_high_priority;
-	if (!p_high_priority && use_native_low_priority_threads) {
+	if (p_task->low_priority && use_native_low_priority_threads) {
 		p_task->low_priority_thread = native_thread_allocator.alloc();
 		task_mutex.unlock();
 
