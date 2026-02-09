@@ -381,7 +381,7 @@ static String _validate_local_path(const String &p_path) {
 	}
 }
 
-Error ResourceLoader::load_threaded_request(const String &p_path, const String &p_type_hint, bool p_use_sub_threads, ResourceFormatLoader::CacheMode p_cache_mode) {
+Error ResourceLoader::load_threaded_request(const String &p_path, const String &p_type_hint, bool p_use_sub_threads, ResourceFormatLoader::CacheMode p_cache_mode, bool p_enqueue_front) {
 	thread_load_mutex.lock();
 	if (user_load_tokens.has(p_path)) {
 		print_verbose("load_threaded_request(): Another threaded load for resource path '" + p_path + "' has been initiated. Not an error.");
@@ -392,7 +392,7 @@ Error ResourceLoader::load_threaded_request(const String &p_path, const String &
 	user_load_tokens[p_path] = nullptr;
 	thread_load_mutex.unlock();
 
-	Ref<ResourceLoader::LoadToken> token = _load_start(p_path, p_type_hint, p_use_sub_threads ? LOAD_THREAD_DISTRIBUTE : LOAD_THREAD_SPAWN_SINGLE, p_cache_mode);
+	Ref<ResourceLoader::LoadToken> token = _load_start(p_path, p_type_hint, p_use_sub_threads ? LOAD_THREAD_DISTRIBUTE : LOAD_THREAD_SPAWN_SINGLE, p_cache_mode, p_enqueue_front);
 	if (token.is_valid()) {
 		thread_load_mutex.lock();
 		token->user_path = p_path;
@@ -411,7 +411,7 @@ Ref<Resource> ResourceLoader::load(const String &p_path, const String &p_type_hi
 		*r_error = OK;
 	}
 
-	Ref<LoadToken> load_token = _load_start(p_path, p_type_hint, LOAD_THREAD_FROM_CURRENT, p_cache_mode);
+	Ref<LoadToken> load_token = _load_start(p_path, p_type_hint, LOAD_THREAD_FROM_CURRENT, p_cache_mode, false);
 	if (!load_token.is_valid()) {
 		if (r_error) {
 			*r_error = FAILED;
@@ -423,7 +423,7 @@ Ref<Resource> ResourceLoader::load(const String &p_path, const String &p_type_hi
 	return res;
 }
 
-Ref<ResourceLoader::LoadToken> ResourceLoader::_load_start(const String &p_path, const String &p_type_hint, LoadThreadMode p_thread_mode, ResourceFormatLoader::CacheMode p_cache_mode) {
+Ref<ResourceLoader::LoadToken> ResourceLoader::_load_start(const String &p_path, const String &p_type_hint, LoadThreadMode p_thread_mode, ResourceFormatLoader::CacheMode p_cache_mode, bool p_enqueue_front) {
 	String local_path = _validate_local_path(p_path);
 
 	Ref<LoadToken> load_token;
@@ -489,7 +489,7 @@ Ref<ResourceLoader::LoadToken> ResourceLoader::_load_start(const String &p_path,
 		if (run_on_current_thread) {
 			load_task_ptr->thread_id = Thread::get_caller_id();
 		} else {
-			load_task_ptr->task_id = WorkerThreadPool::get_singleton()->add_native_task(&ResourceLoader::_thread_load_function, load_task_ptr);
+			load_task_ptr->task_id = WorkerThreadPool::get_singleton()->add_native_task(&ResourceLoader::_thread_load_function, load_task_ptr, p_enqueue_front, true);
 		}
 	}
 
@@ -639,7 +639,7 @@ Ref<Resource> ResourceLoader::_load_complete_inner(LoadToken &p_load_token, Erro
 #endif
 					// CACHE_MODE_IGNORE is needed because, otherwise, the new request would just see there's
 					// an ongoing load for that resource and wait for it again. This value forces a new load.
-					Ref<ResourceLoader::LoadToken> token = _load_start(load_task.local_path, load_task.type_hint, LOAD_THREAD_DISTRIBUTE, ResourceFormatLoader::CACHE_MODE_IGNORE);
+					Ref<ResourceLoader::LoadToken> token = _load_start(load_task.local_path, load_task.type_hint, LOAD_THREAD_DISTRIBUTE, ResourceFormatLoader::CACHE_MODE_IGNORE, false);
 					Ref<Resource> resource = _load_complete(*token.ptr(), &err);
 					if (r_error) {
 						*r_error = err;

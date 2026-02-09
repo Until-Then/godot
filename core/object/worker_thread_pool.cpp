@@ -199,7 +199,7 @@ void WorkerThreadPool::_native_low_priority_thread_function(void *p_user) {
 	singleton->_process_task(task);
 }
 
-void WorkerThreadPool::_post_task(Task *p_task, bool p_high_priority) {
+void WorkerThreadPool::_post_task(Task *p_task, bool p_high_priority, bool p_enqueue_as_low_priority) {
 	// Fall back to processing on the calling thread if there are no worker threads.
 	// Separated into its own variable to make it easier to extend this logic
 	// in custom builds.
@@ -210,7 +210,7 @@ void WorkerThreadPool::_post_task(Task *p_task, bool p_high_priority) {
 	}
 
 	task_mutex.lock();
-	p_task->low_priority = !p_high_priority;
+	p_task->low_priority = p_enqueue_as_low_priority || !p_high_priority;
 	if (!p_high_priority && use_native_low_priority_threads) {
 		p_task->low_priority_thread = native_thread_allocator.alloc();
 		task_mutex.unlock();
@@ -219,16 +219,20 @@ void WorkerThreadPool::_post_task(Task *p_task, bool p_high_priority) {
 			p_task->group->low_priority_native_tasks.push_back(p_task);
 		}
 		p_task->low_priority_thread->start(_native_low_priority_thread_function, p_task); // Pask task directly to thread.
-	} else if (p_high_priority || low_priority_threads_used < max_low_priority_threads) {
+	} else if ((p_high_priority && !p_enqueue_as_low_priority) || low_priority_threads_used < max_low_priority_threads) {
 		task_queue.add_last(&p_task->task_elem);
-		if (!p_high_priority) {
+		if (p_task->low_priority) {
 			low_priority_threads_used++;
 		}
 		task_mutex.unlock();
 		task_available_semaphore.post();
 	} else {
 		// Too many threads using low priority, must go to queue.
-		low_priority_task_queue.add_last(&p_task->task_elem);
+		if (p_high_priority && p_enqueue_as_low_priority) {
+			low_priority_task_queue.add(&p_task->task_elem);
+		} else {
+			low_priority_task_queue.add_last(&p_task->task_elem);
+		}
 		task_mutex.unlock();
 	}
 }
@@ -262,11 +266,11 @@ void WorkerThreadPool::_prevent_low_prio_saturation_deadlock() {
 	}
 }
 
-WorkerThreadPool::TaskID WorkerThreadPool::add_native_task(void (*p_func)(void *), void *p_userdata, bool p_high_priority, const String &p_description) {
-	return _add_task(Callable(), p_func, p_userdata, nullptr, p_high_priority, p_description);
+WorkerThreadPool::TaskID WorkerThreadPool::add_native_task(void (*p_func)(void *), void *p_userdata, bool p_high_priority, bool p_enqueue_as_low_priority, const String &p_description) {
+	return _add_task(Callable(), p_func, p_userdata, nullptr, p_high_priority, p_enqueue_as_low_priority, p_description);
 }
 
-WorkerThreadPool::TaskID WorkerThreadPool::_add_task(const Callable &p_callable, void (*p_func)(void *), void *p_userdata, BaseTemplateUserdata *p_template_userdata, bool p_high_priority, const String &p_description) {
+WorkerThreadPool::TaskID WorkerThreadPool::_add_task(const Callable &p_callable, void (*p_func)(void *), void *p_userdata, BaseTemplateUserdata *p_template_userdata, bool p_high_priority, bool p_enqueue_as_low_priority, const String &p_description) {
 	task_mutex.lock();
 	// Get a free task
 	Task *task = task_allocator.alloc();
@@ -279,13 +283,13 @@ WorkerThreadPool::TaskID WorkerThreadPool::_add_task(const Callable &p_callable,
 	tasks.insert(id, task);
 	task_mutex.unlock();
 
-	_post_task(task, p_high_priority);
+	_post_task(task, p_high_priority, p_enqueue_as_low_priority);
 
 	return id;
 }
 
 WorkerThreadPool::TaskID WorkerThreadPool::add_task(const Callable &p_action, bool p_high_priority, const String &p_description) {
-	return _add_task(p_action, nullptr, nullptr, nullptr, p_high_priority, p_description);
+	return _add_task(p_action, nullptr, nullptr, nullptr, p_high_priority, false, p_description);
 }
 
 bool WorkerThreadPool::is_task_completed(TaskID p_task_id) const {
@@ -456,7 +460,7 @@ WorkerThreadPool::GroupID WorkerThreadPool::_add_group_task(const Callable &p_ca
 	task_mutex.unlock();
 
 	for (int i = 0; i < p_tasks; i++) {
-		_post_task(tasks_posted[i], p_high_priority);
+		_post_task(tasks_posted[i], p_high_priority, false);
 	}
 
 	return id;
